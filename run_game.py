@@ -17,14 +17,25 @@ class Pos(object):
     self.x = x
     self.y = y
     self.z = z
+  def Copy(self):
+    return Pos(self.x, self.y, self.z)
+  def __hash__(self):
+    return hash(tuple(self))
+  def __eq__(self, o):
+    return tuple(self) == tuple(o)
   def __nonzero__(self):
     return self.x != 0 or self.y != 0 or self.z != 0
   def __len__(self):
     return 3
   def __getitem__(self, i):
-    return [self.x, self.y, self.z][i]
+    if i == 0: return self.x
+    elif i == 1: return self.y
+    elif i == 2: return self.z
+    else: raise IndexError()
   def __mul__(self, o):
     return Pos(self.x * o, self.y * o, self.z * o)
+  def __add__(self, o):
+    return Pos(self.x + o.x, self.y + o.y, self.z + o.z)
   def __sub__(self, o):
     return Pos(self.x - o.x, self.y - o.y, self.z - o.z)
   def __isub__(self, o):
@@ -37,12 +48,20 @@ class Pos(object):
     self.y += o.y
     self.z += o.z
     return self
-  def Rotate(self, r):
-    if r:
-      self.y, self.z = self.y * math.cos(r.x) + self.z * math.sin(r.x), self.z * math.cos(r.x) - self.y * math.sin(r.x)
-      self.x, self.z = self.x * math.cos(r.y) + self.z * math.sin(r.y), self.z * math.cos(r.y) - self.x * math.sin(r.y)
-      self.x, self.y = self.x * math.cos(r.z) + self.y * math.sin(r.z), self.y * math.cos(r.z) - self.x * math.sin(r.z)
+  def __gt__(self, o):
+    return any(abs(s) > o for s in self)
+  def Rotate(self, rot):
+    rx = rot.x * math.pi / 180
+    ry = rot.y * math.pi / 180
+    rz = rot.z * math.pi / 180
+    self.y, self.z = self.y * math.cos(rx) + self.z * math.sin(rx), self.z * math.cos(rx) - self.y * math.sin(rx)
+    self.x, self.z = self.x * math.cos(ry) + self.z * math.sin(ry), self.z * math.cos(ry) - self.x * math.sin(ry)
+    self.x, self.y = self.x * math.cos(rz) + self.y * math.sin(rz), self.y * math.cos(rz) - self.x * math.sin(rz)
 
+DOWN = Pos(0, -1, 0)
+UP = Pos(0, 1, 0)
+LEFT = Pos(-1, 0, 0)
+RIGHT = Pos(1, 0, 0)
 
 def CubeProgram():
   program = glCreateProgram()
@@ -91,6 +110,10 @@ class Cube(Pos):
   def __init__(self, x, y, z):
     super(Cube, self).__init__(x, y, z)
     self.rot = Pos(0, 0, 0)
+  def Copy(self):
+    c = Cube(self.x, self.y, self.z)
+    c.rot = self.rot.Copy()
+    return c
 
 
 class Block(object):
@@ -98,36 +121,51 @@ class Block(object):
   def __init__(self):
     self.p = Cube(0, 0, 0)
     self.t = Cube(0, 0, 0)
-    self.cubes = None
+    self.shape = random.choice([
+        [Cube(0, 0, 0), Cube(-1, 0, 0), Cube(1, 0, 0), Cube(0, 1, 0)],
+        [Cube(0, 0, 0), Cube(-1, 0, 0), Cube(1, 0, 0), Cube(2, 0, 0)],
+        [Cube(0, 0, 0), Cube(-1, 0, 0), Cube(0, 1, 0), Cube(1, 1, 0)],
+        [Cube(0, 0, 0), Cube(-1, 0, 0), Cube(-2, 0, 0), Cube(0, 1, 0)],
+        ])
+    self.moved = True
 
   def Cubes(self):
-    if self.cubes:
-      return self.cubes
-    self.cubes = [Pos(0, 0, 0), Pos(-1, 0, 0), Pos(1, 0, 0), Pos(0, 1, 0)]
-    for cube in self.cubes:
-      cube.rot = self.p.rot
-      cube.Rotate(cube.rot)
-      cube += self.p
-    return self.cubes
+    return self.At(self.p)
 
-  def Drop(self):
-    self.t.y -= 1
-    self.p = self.t
-    self.cubes = None
+  def At(self, p):
+    cubes = [c.Copy() for c in self.shape]
+    for cube in cubes:
+      cube.rot = p.rot
+      cube.Rotate(cube.rot)
+      cube += p
+    return cubes
 
   def Update(self):
     dt = self.t - self.p
-    self.p += dt * 0.1
     dr = self.t.rot - self.p.rot
-    self.p.rot += dr * 0.01
-    self.cubes = None
+    if dt > 0.01 or dr > 1:
+      self.p += dt * 0.1
+      self.p.rot += dr * 0.1
+      self.moved = True
+
+  def Logical(self):
+    cubes = self.At(self.t)
+    for c in cubes:
+      c.x = round(c.x)
+      c.y = round(c.y)
+      c.z = round(c.z)
+    return cubes
 
 
 class Game(object):
 
   def __init__(self):
     self.cam = Pos(-1, -10, -10)
-    self.blocks = [Block()]
+    self.blocks = []
+    self.logical = set()
+    self.falling = Block()
+    self.falling.p.y += 10
+    self.falling.t.y += 10
 
   def Start(self):
     pygame.init()
@@ -146,6 +184,7 @@ class Game(object):
     glEnable(GL_DEPTH_TEST)
     glLightfv(GL_LIGHT0, GL_POSITION, (ctypes.c_float * 3)(0, 3, 0))
     glLightfv(GL_LIGHT0, GL_DIFFUSE, (ctypes.c_float * 3)(2, 1, 0))
+    glClearColor(0.2, 0.3, 0.4, 0)
 
     clock = pygame.time.Clock()
     while True:
@@ -154,19 +193,29 @@ class Game(object):
       for e in pygame.event.get():
         if e.type == pygame.QUIT or e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
           return pygame.quit()
-        elif e.type == pygame.KEYDOWN and e.key == pygame.K_LEFT:
-          self.blocks[-1].t.x -= 1
-        elif e.type == pygame.KEYDOWN and e.key == pygame.K_RIGHT:
-          self.blocks[-1].t.x += 1
+        elif e.type == pygame.KEYDOWN and e.key == pygame.K_LEFT and not any(p + LEFT in self.logical for p in self.falling.Logical()):
+          self.falling.t.x -= 1
+        elif e.type == pygame.KEYDOWN and e.key == pygame.K_RIGHT and not any(p + RIGHT in self.logical for p in self.falling.Logical()):
+          self.falling.t.x += 1
         elif e.type == pygame.KEYDOWN and e.key == pygame.K_UP:
-          self.blocks[-1].t.rot.z += math.pi / 2
+          self.falling.t.rot.z += 90
+          if any(p in self.logical for p in self.falling.Logical()):  # Oops, undo.
+            self.falling.t.rot.z -= 90
         elif e.type == pygame.KEYDOWN and e.key == pygame.K_DOWN:
-          self.blocks[-1].Drop()
+          self.falling.t.y -= 1
       self.keys = pygame.key.get_pressed()
-      self.blocks[-1].Update()
+      for block in self.blocks:
+        block.Update()
+      self.falling.Update()
+      if any(p + DOWN in self.logical or p.y == 0 for p in self.falling.Logical()):
+        for p in self.falling.Logical():
+          self.logical.add(p)
+        self.blocks.append(self.falling)
+        self.falling = Block()
+        self.falling.p.y += 10
+        self.falling.t.y += 10
 
       # Render.
-      glClearColor(1, 1, 1, 0)
       glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)
       glMatrixMode(GL_PROJECTION)
       glLoadIdentity()
@@ -181,7 +230,10 @@ class Game(object):
 
   def DrawCubes(self):
     i = 0
-    for block in self.blocks:
+    for block in self.blocks + [self.falling]:
+      if not block.moved:
+        i += 4 * 6 * 4 * 6
+        continue
       for cube in block.Cubes():
         for dim in range(3):
           for c in -1, 1:
@@ -194,6 +246,7 @@ class Game(object):
                 self.cube_vbo[i + j] = cube[j] + 0.49 * d[j]
                 self.cube_vbo[i + j + 3] = n[j]
               i += 6
+      block.moved = False
     glBufferSubData(GL_ARRAY_BUFFER, 0, ctypes.sizeof(self.cube_vbo), self.cube_vbo)
     glEnableClientState(GL_VERTEX_ARRAY)
     glEnableClientState(GL_NORMAL_ARRAY)
@@ -202,4 +255,6 @@ class Game(object):
     glUseProgram(self.cube_program)
     glDrawArrays(GL_QUADS, 0, i)
 
-Game().Start()
+
+if __name__ == '__main__':
+  Game().Start()
