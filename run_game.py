@@ -7,7 +7,7 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 
 
-MAX_CUBES = 100
+MAX_CUBES = 1000
 F = ctypes.sizeof(ctypes.c_float)
 FP = lambda x: ctypes.cast(x * F, ctypes.POINTER(ctypes.c_float))
 
@@ -108,7 +108,6 @@ void main() {
 
 
 class Cube(Pos):
-
   def __init__(self, x, y, z):
     super(Cube, self).__init__(x, y, z)
     self.rot = Pos(0, 0, 0)
@@ -116,6 +115,51 @@ class Cube(Pos):
     c = Cube(self.x, self.y, self.z)
     c.rot = self.rot.Copy()
     return c
+
+
+class Qube(Pos):
+  def __init__(self, x, y, z):
+    super(Qube, self).__init__(x, y, z)
+    self.quat = Quat(0, 0, 0, 1)
+  def Copy(self):
+    c = Qube(self.x, self.y, self.z)
+    c.quat = self.quat.Copy()
+    return c
+
+class Quat(object):
+  @staticmethod
+  def FromAngle(degrees, x, y, z):
+    r = degrees * math.pi / 180
+    return Quat(x * math.sin(r), y * math.sin(r), z * math.sin(r), math.cos(r))
+  def __init__(self, x, y, z, w):
+    self.x = x
+    self.y = y
+    self.z = z
+    self.w = w
+  def Copy(self):
+    return Quat(self.x, self.y, self.z, self.w)
+  def __mul__(a, b):
+    return Quat(a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+                a.w * b.y + a.y * b.w + a.z * b.x - a.x * b.z,
+                a.w * b.z + a.z * b.w + a.x * b.y - a.y * b.x,
+                a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z)
+  def Rotate(self, v):
+    result = self * Quat(v.x, v.y, v.z, 0) * Quat(-self.x, -self.y, -self.z, self.w)
+    return Pos(result.x, result.y, result.z)
+  def Matrix(self):
+    x2 = self.x * self.x
+    y2 = self.y * self.y
+    z2 = self.z * self.z
+    xy = self.x * self.y
+    xz = self.x * self.z
+    xw = self.x * self.w
+    yz = self.y * self.z
+    yw = self.y * self.w
+    zw = self.z * self.w
+    return (ctypes.c_float * 16)(1 - 2 * (y2 + z2), 2 * (xy - zw), 2 * (xz + yw), 0,
+                                 2 * (xy + zw), 1 - 2 * (x2 + z2), 2 * (yz - xw), 0,
+                                 2 * (xz - yw), 2 * (yz + xw), 1 - 2 * (x2 + y2), 0,
+                                 0, 0, 0, 1)
 
 
 class Block(object):
@@ -159,6 +203,7 @@ class Game(object):
   def __init__(self):
     self.cam = Pos(-1, -10, -10)
     self.camt = self.cam.Copy()
+    self.draw_func = self.Build
     self.blocks = []
     self.logical = set()
     self.falling = Block()
@@ -173,6 +218,10 @@ class Game(object):
     screen = pygame.display.set_mode((width, height), pygame.OPENGL | pygame.DOUBLEBUF | pygame.HWSURFACE)
     pygame.display.set_caption('Space Bear Cathedrals')
     glViewport(0, 0, width, height)
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    glFrustum(-0.8, 0.8, -0.6, 0.6, 1, 100)
+    glMatrixMode(GL_MODELVIEW)
 
     self.cube_vbo = (ctypes.c_float * (2 * 3 * 4 * 6 * MAX_CUBES))()
     self.cube_vbo_id = glGenBuffers(1)
@@ -187,52 +236,76 @@ class Game(object):
     clock = pygame.time.Clock()
     while True:
       clock.tick(60)
-      # Update.
-      for e in pygame.event.get():
-        if e.type == pygame.QUIT or e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
-          return pygame.quit()
-        elif e.type == pygame.KEYDOWN and e.key == pygame.K_LEFT and not any(p + LEFT in self.logical for p in self.falling.Logical()):
-          self.falling.t += LEFT
-        elif e.type == pygame.KEYDOWN and e.key == pygame.K_RIGHT and not any(p + RIGHT in self.logical for p in self.falling.Logical()):
-          self.falling.t += RIGHT
-        elif e.type == pygame.KEYDOWN and e.key == pygame.K_UP:
-          self.falling.t.rot.z += 90
-          if any(p in self.logical or p.y < 0 for p in self.falling.Logical()):  # Oops, undo.
-            self.falling.t.rot.z -= 90
-        elif e.type == pygame.KEYDOWN and e.key == pygame.K_DOWN:
-          if any(p + DOWN in self.logical or p.y == 0 for p in self.falling.Logical()):
-            for p in self.falling.Logical():
-              self.logical.add(p)
-            self.blocks.append(self.falling)
-            self.falling = Block()
-            self.falling.t.y += 10
-            self.falling.t.z = self.blocks[-1].t.z
-            self.falling.p = self.falling.t.Copy()
-          else:
-            self.falling.t += DOWN
-        elif e.type == pygame.KEYDOWN and e.key == pygame.K_RETURN:
-          self.falling.t.z += 1
-          self.camt.z -= 1
-      self.keys = pygame.key.get_pressed()
-      for block in self.blocks:
-        block.Update()
-      self.falling.Update()
+      self.draw_func()
 
-      dcam = self.camt - self.cam
-      self.cam += dcam * 0.1
+  def Build(self):
+    # Render.
+    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)
+    glLoadIdentity()
+    glRotate(30, 1, 0, 0)
+    glTranslate(self.cam.x, self.cam.y, self.cam.z)
+    self.DrawCubes()
+    pygame.display.flip()
+    # Update.
+    for block in self.blocks:
+      block.Update()
+    self.falling.Update()
+    self.cam += (self.camt - self.cam) * 0.1
+    for e in pygame.event.get():
+      if e.type == pygame.QUIT or e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
+        pygame.quit()
+        sys.exit(0)
+      elif e.type == pygame.KEYDOWN and e.key == pygame.K_LEFT and not any(p + LEFT in self.logical for p in self.falling.Logical()):
+        self.falling.t += LEFT
+      elif e.type == pygame.KEYDOWN and e.key == pygame.K_RIGHT and not any(p + RIGHT in self.logical for p in self.falling.Logical()):
+        self.falling.t += RIGHT
+      elif e.type == pygame.KEYDOWN and e.key == pygame.K_UP:
+        self.falling.t.rot.z += 90
+        if any(p in self.logical or p.y < 0 for p in self.falling.Logical()):  # Oops, undo.
+          self.falling.t.rot.z -= 90
+      elif e.type == pygame.KEYDOWN and e.key == pygame.K_DOWN:
+        if any(p + DOWN in self.logical or p.y == 0 for p in self.falling.Logical()):
+          for p in self.falling.Logical():
+            self.logical.add(p)
+          self.blocks.append(self.falling)
+          self.falling = Block()
+          self.falling.t.y += 10
+          self.falling.t.z = self.blocks[-1].t.z
+          self.falling.p = self.falling.t.Copy()
+        else:
+          self.falling.t += DOWN
+      elif e.type == pygame.KEYDOWN and e.key == pygame.K_RETURN:
+        self.falling.t.z += 1
+        self.camt.z -= 1
+        if self.falling.t.z > max(self.logical | set([Pos(0, 0, 0)]), key=lambda c: c.z).z + 1:
+          self.cam = Qube(0, 0, -10)
+          self.camt = self.cam.Copy()
+          self.draw_func = self.Fly
 
-      # Render.
-      glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)
-      glMatrixMode(GL_PROJECTION)
-      glLoadIdentity()
-      #gluPerspective(45.0, 1.2, 0.1, 100.0)
-      glFrustum(-0.8, 0.8, -0.6, 0.6, 1, 100)
-      glMatrixMode(GL_MODELVIEW)
-      glLoadIdentity()
-      glRotate(30, 1, 0, 0)
-      glTranslate(self.cam.x, self.cam.y, self.cam.z)
-      self.DrawCubes()
-      pygame.display.flip()
+  def Fly(self):
+    # Render.
+    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)
+    glLoadIdentity()
+    glTranslate(self.cam.x, self.cam.y, self.cam.z)
+    glMultMatrixf(self.cam.quat.Matrix())
+    glRotate(30, 1, 0, 0)
+    self.DrawCubes()
+    pygame.display.flip()
+    # Update.
+    keys = pygame.key.get_pressed()
+    if keys[pygame.K_LEFT]: self.camt.quat = self.camt.quat * Quat.FromAngle(1, 0, 1, 0)
+    if keys[pygame.K_RIGHT]: self.camt.quat = self.camt.quat * Quat.FromAngle(-1, 0, 1, 0)
+    if keys[pygame.K_UP]: self.camt.quat = self.camt.quat * Quat.FromAngle(1, 1, 0, 0)
+    if keys[pygame.K_DOWN]: self.camt.quat = self.camt.quat * Quat.FromAngle(-1, 1, 0, 0)
+    self.cam += (self.camt - self.cam) * 0.1
+    self.cam.quat.x += (self.camt.quat.x - self.cam.quat.x) * 0.1
+    self.cam.quat.y += (self.camt.quat.y - self.cam.quat.y) * 0.1
+    self.cam.quat.z += (self.camt.quat.z - self.cam.quat.z) * 0.1
+    self.cam.quat.w += (self.camt.quat.w - self.cam.quat.w) * 0.1
+    for e in pygame.event.get():
+      if e.type == pygame.QUIT or e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
+        pygame.quit()
+        sys.exit(0)
 
   def DrawCubes(self):
     i = 0
