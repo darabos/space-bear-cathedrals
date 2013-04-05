@@ -57,6 +57,8 @@ class Pos(object):
     self.y, self.z = self.y * math.cos(rx) + self.z * math.sin(rx), self.z * math.cos(rx) - self.y * math.sin(rx)
     self.x, self.z = self.x * math.cos(ry) + self.z * math.sin(ry), self.z * math.cos(ry) - self.x * math.sin(ry)
     self.x, self.y = self.x * math.cos(rz) + self.y * math.sin(rz), self.y * math.cos(rz) - self.x * math.sin(rz)
+  def Round(self):
+    return Pos(round(self.x), round(self.y), round(self.z))
 
 DOWN = Pos(0, -1, 0)
 UP = Pos(0, 1, 0)
@@ -132,6 +134,9 @@ class Block(object):
   def Cubes(self):
     return self.At(self.p)
 
+  def Logical(self):
+    return [c.Round() for c in self.At(self.t)]
+
   def At(self, p):
     cubes = [c.Copy() for c in self.shape]
     for cube in cubes:
@@ -148,19 +153,12 @@ class Block(object):
       self.p.rot += dr * 0.1
       self.moved = True
 
-  def Logical(self):
-    cubes = self.At(self.t)
-    for c in cubes:
-      c.x = round(c.x)
-      c.y = round(c.y)
-      c.z = round(c.z)
-    return cubes
-
 
 class Game(object):
 
   def __init__(self):
     self.cam = Pos(-1, -10, -10)
+    self.camt = self.cam.Copy()
     self.blocks = []
     self.logical = set()
     self.falling = Block()
@@ -194,26 +192,34 @@ class Game(object):
         if e.type == pygame.QUIT or e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
           return pygame.quit()
         elif e.type == pygame.KEYDOWN and e.key == pygame.K_LEFT and not any(p + LEFT in self.logical for p in self.falling.Logical()):
-          self.falling.t.x -= 1
+          self.falling.t += LEFT
         elif e.type == pygame.KEYDOWN and e.key == pygame.K_RIGHT and not any(p + RIGHT in self.logical for p in self.falling.Logical()):
-          self.falling.t.x += 1
+          self.falling.t += RIGHT
         elif e.type == pygame.KEYDOWN and e.key == pygame.K_UP:
           self.falling.t.rot.z += 90
-          if any(p in self.logical for p in self.falling.Logical()):  # Oops, undo.
+          if any(p in self.logical or p.y < 0 for p in self.falling.Logical()):  # Oops, undo.
             self.falling.t.rot.z -= 90
         elif e.type == pygame.KEYDOWN and e.key == pygame.K_DOWN:
-          self.falling.t.y -= 1
+          if any(p + DOWN in self.logical or p.y == 0 for p in self.falling.Logical()):
+            for p in self.falling.Logical():
+              self.logical.add(p)
+            self.blocks.append(self.falling)
+            self.falling = Block()
+            self.falling.t.y += 10
+            self.falling.t.z = self.blocks[-1].t.z
+            self.falling.p = self.falling.t.Copy()
+          else:
+            self.falling.t += DOWN
+        elif e.type == pygame.KEYDOWN and e.key == pygame.K_RETURN:
+          self.falling.t.z += 1
+          self.camt.z -= 1
       self.keys = pygame.key.get_pressed()
       for block in self.blocks:
         block.Update()
       self.falling.Update()
-      if any(p + DOWN in self.logical or p.y == 0 for p in self.falling.Logical()):
-        for p in self.falling.Logical():
-          self.logical.add(p)
-        self.blocks.append(self.falling)
-        self.falling = Block()
-        self.falling.p.y += 10
-        self.falling.t.y += 10
+
+      dcam = self.camt - self.cam
+      self.cam += dcam * 0.1
 
       # Render.
       glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)
