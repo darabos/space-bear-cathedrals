@@ -69,6 +69,8 @@ DOWN = Pos(0, -1, 0)
 UP = Pos(0, 1, 0)
 LEFT = Pos(-1, 0, 0)
 RIGHT = Pos(1, 0, 0)
+FRONT = Pos(0, 0, 1)
+BACK = Pos(0, 0, -1)
 
 def CubeProgram():
   program = glCreateProgram()
@@ -272,6 +274,27 @@ class Object(list):
     glPopMatrix()
 
 
+def RandomObject():
+
+  def AddBlock(p):
+    b = Block()
+    b.shape = [Cube(0, 0, 0)]
+    b.p = p.Copy()
+    b.t = p.Copy()
+    o.append(b)
+    logical.add(p.Copy())
+
+  o = Object()
+  logical = set()
+  p = Cube(0, 0, 0)
+  AddBlock(p)
+  while random.random() < 0.95:
+    p += random.choice([UP, DOWN, LEFT, RIGHT, FRONT, BACK])
+    if p not in logical:
+      AddBlock(p)
+  return o
+
+
 class Game(object):
 
   def __init__(self):
@@ -347,15 +370,14 @@ class Game(object):
         else:
           self.falling.t += DOWN
       elif e.type == pygame.KEYDOWN and e.key == pygame.K_RETURN:
-        self.falling.t.z += 1
+        self.falling.t += FRONT
         self.camt.z -= 1
         if self.falling.t.z > max(self.logical | set([Pos(0, 0, 0)]), key=lambda c: c.z).z + 1:
           self.blocks.pop()
           self.cam = Qube(0, 0, 20)
           self.camt = self.cam.Copy()
           for i in range(100):
-            o = Object()
-            o.append(Block())
+            o = RandomObject()
             o.p.x = random.gauss(0, 100)
             o.p.y = random.gauss(0, 100)
             o.p.z = random.gauss(0, 100)
