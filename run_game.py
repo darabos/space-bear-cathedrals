@@ -144,6 +144,9 @@ class Quat(object):
     self.w = w
   def Copy(self):
     return Quat(self.x, self.y, self.z, self.w)
+  def Normalized(self):
+    l = math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w)
+    return Quat(self.x / l, self.y / l, self.z / l, self.w / l)
   def __mul__(a, b):
     return Quat(a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
                 a.w * b.y + a.y * b.w + a.z * b.x - a.x * b.z,
@@ -210,7 +213,11 @@ class Object(list):
   def __init__(self):
     super(Object, self).__init__()
     self.p = Qube(0, 0, 0)
+    self.v = Qube(0, 0, 0)
     self.cube_vbo = None
+
+  def Update(self):
+    self.p.quat *= self.v.quat
 
   def Render(self):
     if self.cube_vbo is None:
@@ -219,10 +226,12 @@ class Object(list):
       glBindBuffer(GL_ARRAY_BUFFER, self.cube_vbo_id)
       glBufferData(GL_ARRAY_BUFFER, ctypes.sizeof(self.cube_vbo), self.cube_vbo, GL_DYNAMIC_DRAW)
     i = 0
+    changed = False
     for block in self:
       if block.rendered:
         i += block.rendered * 6 * 4 * 6
         continue
+      changed = True
       for cube in block.Cubes():
         for dim in range(3):
           for c in -1, 1:
@@ -239,7 +248,8 @@ class Object(list):
     glBindBuffer(GL_ARRAY_BUFFER, self.cube_vbo_id)
     glPushMatrix()
     glMultMatrixf(self.p.Matrix())
-    glBufferSubData(GL_ARRAY_BUFFER, 0, ctypes.sizeof(self.cube_vbo), self.cube_vbo)
+    if changed:
+      glBufferSubData(GL_ARRAY_BUFFER, 0, ctypes.sizeof(self.cube_vbo), self.cube_vbo)
     glEnableClientState(GL_VERTEX_ARRAY)
     glEnableClientState(GL_NORMAL_ARRAY)
     glVertexPointer(3, GL_FLOAT, 6 * F, FP(0))
@@ -272,7 +282,7 @@ class Game(object):
     glViewport(0, 0, width, height)
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
-    glFrustum(-0.8, 0.8, -0.6, 0.6, 1, 100)
+    glFrustum(-0.8, 0.8, -0.6, 0.6, 1, 500)
     glMatrixMode(GL_MODELVIEW)
 
     glUseProgram(CubeProgram())
@@ -329,14 +339,23 @@ class Game(object):
           self.blocks.pop()
           self.cam = Qube(0, 0, -10)
           self.camt = self.cam.Copy()
+          for i in range(100):
+            o = Object()
+            o.append(Block())
+            o.p.x = random.gauss(0, 100)
+            o.p.y = random.gauss(0, 100)
+            o.p.z = random.gauss(0, 100)
+            r = lambda: random.gauss(0, 0.01)
+            o.v.quat = Quat(r(), r(), r(), 1).Normalized()
+            self.objects.append(o)
           self.draw_func = self.Fly
 
   def Fly(self):
     # Render.
     glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)
     glLoadIdentity()
-    glTranslate(self.cam.x, self.cam.y, self.cam.z)
-    glMultMatrixf(self.cam.quat.Conj().Matrix())
+    #glTranslate(self.cam.x, self.cam.y, self.cam.z)
+    glMultMatrixf(self.cam.Matrix())
     glRotate(30, 1, 0, 0)
     for obj in self.objects:
       obj.Render()
@@ -345,14 +364,16 @@ class Game(object):
     keys = pygame.key.get_pressed()
     if keys[pygame.K_LEFT]: self.camt.quat *= Quat.FromAngle(1, 0, 1, 0)
     if keys[pygame.K_RIGHT]: self.camt.quat *= Quat.FromAngle(-1, 0, 1, 0)
-    if keys[pygame.K_UP]: self.camt.quat *= Quat.FromAngle(1, 1, 0, 0)
-    if keys[pygame.K_DOWN]: self.camt.quat *= Quat.FromAngle(-1, 1, 0, 0)
+    if keys[pygame.K_UP]: self.camt.quat *= Quat.FromAngle(-1, 1, 0, 0)
+    if keys[pygame.K_DOWN]: self.camt.quat *= Quat.FromAngle(1, 1, 0, 0)
     self.blocks.p.quat = self.camt.quat.Copy()
     self.cam += (self.camt - self.cam) * 0.1
     self.cam.quat.x += (self.camt.quat.x - self.cam.quat.x) * 0.1
     self.cam.quat.y += (self.camt.quat.y - self.cam.quat.y) * 0.1
     self.cam.quat.z += (self.camt.quat.z - self.cam.quat.z) * 0.1
     self.cam.quat.w += (self.camt.quat.w - self.cam.quat.w) * 0.1
+    for obj in self.objects:
+      obj.Update()
     for e in pygame.event.get():
       if e.type == pygame.QUIT or e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
         pygame.quit()
