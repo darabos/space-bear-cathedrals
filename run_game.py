@@ -158,7 +158,7 @@ class Qube(Pos):
 class Quat(object):
   @staticmethod
   def FromAngle(degrees, x, y, z):
-    r = degrees * math.pi / 180
+    r = degrees * math.pi / 180 / 2
     return Quat(x * math.sin(r), y * math.sin(r), z * math.sin(r), math.cos(r))
   def __init__(self, x, y, z, w):
     self.x = x
@@ -311,9 +311,10 @@ def Music(filename):
 class Game(object):
 
   def __init__(self):
-    self.cam = Pos(-1, -10, -10)
+    self.cam = Qube(1, 10, 10)
+    self.cam.quat = Quat.FromAngle(30, 1, 0, 0)
     self.camt = self.cam.Copy()
-    self.draw_func = self.Build
+    self.update_func = self.Build
     self.blocks = Object()
     self.objects = [self.blocks]
     self.logical = set()
@@ -344,18 +345,15 @@ class Game(object):
     clock = pygame.time.Clock()
     while True:
       clock.tick(60)
-      self.draw_func()
+      self.update_func()
+      glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)
+      glLoadIdentity()
+      glMultMatrixf(self.cam.InverseMatrix())
+      for obj in self.objects:
+        obj.Render()
+      pygame.display.flip()
 
   def Build(self):
-    # Render.
-    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)
-    glLoadIdentity()
-    glRotate(30, 1, 0, 0)
-    glTranslate(self.cam.x, self.cam.y, self.cam.z)
-    for obj in self.objects:
-      obj.Render()
-    pygame.display.flip()
-    # Update.
     for block in self.blocks:
       block.Update()
     self.cam += (self.camt - self.cam) * 0.1
@@ -384,7 +382,7 @@ class Game(object):
           self.falling.t += DOWN
       elif e.type == pygame.KEYDOWN and e.key == pygame.K_RETURN:
         self.falling.t += FRONT
-        self.camt.z -= 1
+        self.camt += FRONT
         if self.falling.t.z > max(self.logical | set([Pos(0, 0, 0)]), key=lambda c: c.z).z + 1:
           self.blocks.pop()
           self.cam = Qube(0, 0, 20)
@@ -398,23 +396,15 @@ class Game(object):
             o.v.quat = Quat(r(), r(), r(), 1).Normalized()
             self.objects.append(o)
           Music('sbc1.ogg')
-          self.draw_func = self.Fly
+          self.update_func = self.Fly
 
   def Fly(self):
-    # Render.
-    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)
-    glLoadIdentity()
-    glMultMatrixf(self.cam.InverseMatrix())
-    for obj in self.objects:
-      obj.Render()
-    pygame.display.flip()
-    # Update.
     keys = pygame.key.get_pressed()
     r = lambda x, y, z: self.blocks.p.quat.Rotate(Pos(x, y, z))
-    if keys[pygame.K_RIGHT]: self.blocks.p.quat *= Quat.FromAngle(1, *r(0, 1, 0))
-    if keys[pygame.K_LEFT]: self.blocks.p.quat *= Quat.FromAngle(-1, *r(0, 1, 0))
-    if keys[pygame.K_DOWN]: self.blocks.p.quat *= Quat.FromAngle(-1, *r(1, 0, 0))
-    if keys[pygame.K_UP]: self.blocks.p.quat *= Quat.FromAngle(1, *r(1, 0, 0))
+    if keys[pygame.K_RIGHT]: self.blocks.p.quat *= Quat.FromAngle(2, *r(0, 1, 0))
+    if keys[pygame.K_LEFT]: self.blocks.p.quat *= Quat.FromAngle(-2, *r(0, 1, 0))
+    if keys[pygame.K_DOWN]: self.blocks.p.quat *= Quat.FromAngle(-2, *r(1, 0, 0))
+    if keys[pygame.K_UP]: self.blocks.p.quat *= Quat.FromAngle(2, *r(1, 0, 0))
     if keys[pygame.K_SPACE]: self.blocks.v += r(0, 0, -0.01)
     self.blocks.v *= 0.99  # Space friction.
     self.camt = self.blocks.p + r(0, 2, 10)
