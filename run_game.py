@@ -64,6 +64,8 @@ class Pos(object):
     self.x, self.y = self.x * math.cos(rz) + self.y * math.sin(rz), self.y * math.cos(rz) - self.x * math.sin(rz)
   def Round(self):
     return Pos(round(self.x), round(self.y), round(self.z))
+  def __abs__(self):
+    return math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
 
 DOWN = Pos(0, -1, 0)
 UP = Pos(0, 1, 0)
@@ -132,6 +134,11 @@ class Qube(Pos):
     c = Qube(self.x, self.y, self.z)
     c.quat = self.quat.Copy()
     return c
+  def Apply(self, p):
+    p = p.Copy()
+    p = self.quat.Rotate(p)
+    p += self
+    return p
   def Matrix(self):
     m = self.quat.Matrix()
     m[12] += self.x
@@ -414,6 +421,19 @@ class Game(object):
     self.cam.quat = self.cam.quat.Normalized()
     for obj in self.objects:
       obj.Update()
+    p = self.blocks.p
+    if len(self.objects) > 1:
+      closest = min(self.objects, key=lambda o: abs(p - o.p) if o is not self.blocks else float('inf'))
+      eaten = set()
+      for block in closest:
+        if eaten:
+          block.rendered = 0
+        if abs(p - closest.p.Apply(block.p)) < 1:
+          eaten.add(block)
+      for block in eaten:
+        closest.remove(block)
+      if len(closest) == 0:
+        self.objects.remove(closest)
     for e in pygame.event.get():
       if e.type == pygame.QUIT or e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
         pygame.quit()
