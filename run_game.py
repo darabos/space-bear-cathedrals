@@ -1,5 +1,6 @@
 import ctypes
 import math
+import os
 import pygame
 import random
 import sys
@@ -302,6 +303,11 @@ def RandomObject():
   return o
 
 
+def Music(filename):
+  if os.path.exists(filename):
+    pygame.mixer.music.load(filename)
+    pygame.mixer.music.play()
+
 class Game(object):
 
   def __init__(self):
@@ -391,6 +397,7 @@ class Game(object):
             r = lambda: random.gauss(0, 0.01)
             o.v.quat = Quat(r(), r(), r(), 1).Normalized()
             self.objects.append(o)
+          Music('sbc1.ogg')
           self.draw_func = self.Fly
 
   def Fly(self):
@@ -421,8 +428,8 @@ class Game(object):
     self.cam.quat = self.cam.quat.Normalized()
     for obj in self.objects:
       obj.Update()
-    p = self.blocks.p
-    if len(self.objects) > 1:
+    if len(self.objects) > 1:  # See if we can eat anything.
+      p = self.blocks.p
       closest = min(self.objects, key=lambda o: abs(p - o.p) if o is not self.blocks else float('inf'))
       eaten = set()
       for block in closest:
