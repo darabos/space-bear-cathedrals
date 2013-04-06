@@ -48,6 +48,11 @@ class Pos(object):
     self.y += o.y
     self.z += o.z
     return self
+  def __imul__(self, o):
+    self.x *= o
+    self.y *= o
+    self.z *= o
+    return self
   def __gt__(self, o):
     return any(abs(s) > o for s in self)
   def Rotate(self, rot):
@@ -131,6 +136,14 @@ class Qube(Pos):
     m[13] += self.y
     m[14] += self.z
     return m
+  def InverseMatrix(self):
+    m = self.quat.Conj().Matrix()
+    r = self.quat.Conj().Rotate(self)
+    m[12] -= r.x
+    m[13] -= r.y
+    m[14] -= r.z
+    return m
+
 
 class Quat(object):
   @staticmethod
@@ -155,7 +168,7 @@ class Quat(object):
   def Conj(self):
     return Quat(-self.x, -self.y, -self.z, self.w)
   def Rotate(self, v):
-    result = self * Quat(v.x, v.y, v.z, 0) * self.Conj()
+    result = self.Conj() * Quat(v.x, v.y, v.z, 0) * self
     return Pos(result.x, result.y, result.z)
   def Matrix(self):
     x2 = self.x * self.x
@@ -218,6 +231,7 @@ class Object(list):
 
   def Update(self):
     self.p.quat *= self.v.quat
+    self.p += self.v
 
   def Render(self):
     if self.cube_vbo is None:
@@ -337,7 +351,7 @@ class Game(object):
         self.camt.z -= 1
         if self.falling.t.z > max(self.logical | set([Pos(0, 0, 0)]), key=lambda c: c.z).z + 1:
           self.blocks.pop()
-          self.cam = Qube(0, 0, -10)
+          self.cam = Qube(0, 0, 20)
           self.camt = self.cam.Copy()
           for i in range(100):
             o = Object()
@@ -354,24 +368,28 @@ class Game(object):
     # Render.
     glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)
     glLoadIdentity()
-    #glTranslate(self.cam.x, self.cam.y, self.cam.z)
-    glMultMatrixf(self.cam.Matrix())
-    glRotate(30, 1, 0, 0)
+    glMultMatrixf(self.cam.InverseMatrix())
     for obj in self.objects:
       obj.Render()
     pygame.display.flip()
     # Update.
     keys = pygame.key.get_pressed()
-    if keys[pygame.K_LEFT]: self.camt.quat *= Quat.FromAngle(1, 0, 1, 0)
-    if keys[pygame.K_RIGHT]: self.camt.quat *= Quat.FromAngle(-1, 0, 1, 0)
-    if keys[pygame.K_UP]: self.camt.quat *= Quat.FromAngle(-1, 1, 0, 0)
-    if keys[pygame.K_DOWN]: self.camt.quat *= Quat.FromAngle(1, 1, 0, 0)
-    self.blocks.p.quat = self.camt.quat.Copy()
-    self.cam += (self.camt - self.cam) * 0.1
-    self.cam.quat.x += (self.camt.quat.x - self.cam.quat.x) * 0.1
-    self.cam.quat.y += (self.camt.quat.y - self.cam.quat.y) * 0.1
-    self.cam.quat.z += (self.camt.quat.z - self.cam.quat.z) * 0.1
-    self.cam.quat.w += (self.camt.quat.w - self.cam.quat.w) * 0.1
+    r = lambda x, y, z: self.blocks.p.quat.Rotate(Pos(x, y, z))
+    if keys[pygame.K_RIGHT]: self.blocks.p.quat *= Quat.FromAngle(1, *r(0, 1, 0))
+    if keys[pygame.K_LEFT]: self.blocks.p.quat *= Quat.FromAngle(-1, *r(0, 1, 0))
+    if keys[pygame.K_DOWN]: self.blocks.p.quat *= Quat.FromAngle(-1, *r(1, 0, 0))
+    if keys[pygame.K_UP]: self.blocks.p.quat *= Quat.FromAngle(1, *r(1, 0, 0))
+    if keys[pygame.K_SPACE]: self.blocks.v += r(0, 0, -0.01)
+    self.blocks.v *= 0.99  # Space friction.
+    self.camt = self.blocks.p + r(0, 2, 10)
+    cam_speed = 0.1
+    self.camt.quat = self.blocks.p.quat
+    self.cam += (self.camt - self.cam) * cam_speed
+    self.cam.quat.x += (self.camt.quat.x - self.cam.quat.x) * cam_speed
+    self.cam.quat.y += (self.camt.quat.y - self.cam.quat.y) * cam_speed
+    self.cam.quat.z += (self.camt.quat.z - self.cam.quat.z) * cam_speed
+    self.cam.quat.w += (self.camt.quat.w - self.cam.quat.w) * cam_speed
+    self.cam.quat = self.cam.quat.Normalized()
     for obj in self.objects:
       obj.Update()
     for e in pygame.event.get():
